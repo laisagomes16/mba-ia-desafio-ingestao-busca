@@ -1,3 +1,10 @@
+import os
+
+from dotenv import load_dotenv
+from langchain_postgres import PGVector
+from langchain_core.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+
 PROMPT_TEMPLATE = """
 CONTEXTO:
 {contexto}
@@ -25,5 +32,30 @@ PERGUNTA DO USUÁRIO:
 RESPONDA A "PERGUNTA DO USUÁRIO"
 """
 
-def search_prompt(question=None):
-    pass
+def search_prompt(question: str | None = None) -> str:
+    load_dotenv()
+    if not question or not str(question).strip():
+        raise ValueError("É necessário informar uma pergunta (texto não vazio).")
+
+    pergunta = str(question).strip()
+
+    prompt = PromptTemplate.from_template(PROMPT_TEMPLATE)
+    llm = ChatOpenAI(model="gpt-5-nano", temperature=0)
+    embeddings = OpenAIEmbeddings(
+        model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+    )
+
+    store = PGVector(
+        embeddings=embeddings,
+        collection_name=os.getenv("PG_VECTOR_COLLECTION_NAME"),
+        connection=os.getenv("DATABASE_URL"),
+        use_jsonb=True,
+    )
+
+    results = store.similarity_search_with_score(pergunta, k=10)
+    contexto = "\n\n---\n\n".join(doc.page_content for doc, _score in results)
+
+    chain = prompt | llm
+    resposta = chain.invoke({"contexto": contexto, "pergunta": pergunta})
+    return resposta.content
+
